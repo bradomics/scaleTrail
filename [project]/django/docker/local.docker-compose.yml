@@ -1,0 +1,12 @@
+services:
+  backend:
+    build:
+      context: .
+    env_file:
+      - .env
+    command: python manage.py runserver 0.0.0.0:8000
+    working_dir: /app/backend  # So commands like manage.py run in the right place
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app/

@@ -1,0 +1,31 @@
+services:
+  backend_dev:
+    image: ghcr.io/[your-github-username]/[your-backend-repo]:dev
+    env_file: .env.dev
+    command: gunicorn scaletrail_project.wsgi:application --bind 0.0.0.0:8000
+    volumes:
+      - static_dev:/app/backend/static_dev
+    expose:
+      - "8000" # Exposed only to internal NGINX
+    networks:
+      - scaletrailnet
+
+  nginx_dev:
+    image: nginx:latest
+    depends_on:
+      - backend_dev
+    volumes:
+      - ./nginx/nginx-dev.conf:/etc/nginx/conf.d/default.conf
+      - static_dev:/app/backend/static_dev
+      - /etc/cloudflare/origin-certs:/etc/nginx/certs:ro
+    expose:
+      - "80"
+      - "443"
+    networks:
+      - scaletrailnet
+volumes:
+  static_dev:
+  cloudflare_cert:
+networks:
+  scaletrailnet:
+    external: true
