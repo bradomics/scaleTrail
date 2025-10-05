@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scaletrail"
+version = "0.1.0"
+description = "ScaleTrail CLI"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+  "typer[all]>=0.12",
+  "rich>=13",
+  "pyfiglet>=0.8",
+  "rich-pyfiglet>=1.0.0"
+]
+
+# This creates the shell command `scaletrail`
+[project.scripts]
+scaletrail = "scaletrail.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
