@@ -1,0 +1,11 @@
+volumes:
+  static_dev:
+    external: true
+  static_prod:
+    external: true
+  cloudflare_cert:
+    external: true
+
+networks:
+  scaletrailnet:
+    external: true
