@@ -32,7 +32,16 @@ If this is your first time setting up scaleTrail, you'll want to do the followin
 4. Initialize the terraform workspace: `terraform init`
 
 ## New project workflow
-1. Right now you have to rename resources manually if you want to change the project and label names within Linode (sorry) but the plan is to eventually have a CLI tool that automates this.
+**Intall scaletrail CLI**
+1. `cd` into the `cli` directory
+2. Create the CLI virtual environment: `python -m venv cli_venv`
+3. Activate the CLI virtual environment: `source cli_venv/bin/activate`
+4. Upgrade pip: `pip install --upgrade pip`
+5. Install CLI dependencies: `pip install .`
+
+**Initialize a new project**
+1. Run `scaletrail init`
+2. Complete the initialization steps.
 
 ## Making changes
 1. Navigate to the project folder for the project that you want to make changes for.
