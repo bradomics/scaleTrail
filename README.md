@@ -24,15 +24,18 @@ ScaleTrail should make projects:
     - It should only allow trusted traffic.
     - Packages should be updated frequently without introducing breaking changes.
 
-## Initial setup
-If this is your first time setting up scaleTrail, you'll want to do the following:
+## Prerequisites
+ScaleTrail assumes you have a Linode account, a Cloudflare account, and a few existing configurations in each.
+**Linode**
 1. Create a new SSH key pair. ScaleTrail assumes your public key is at the following location `~/.ssh/scaletrail_project.pub`.
 2. Log in to Linode and add your SSH key: https://cloud.linode.com/profile/keys
-3. `cd` into the newly renamed `[project]` directory
-4. Initialize the terraform workspace: `terraform init`
+
+**Cloudflare**
+1. Create a Cloudflare account if you don't already have one.
+2. Add a new domain within Cloudflare, and configure Cloudflare DNS for the new domain.
 
 ## New project workflow
-**Intall scaletrail CLI**
+**Install scaletrail CLI**
 1. `cd` into the `cli` directory
 2. Create the CLI virtual environment: `python -m venv cli_venv`
 3. Activate the CLI virtual environment: `source cli_venv/bin/activate`
@@ -44,7 +47,16 @@ If this is your first time setting up scaleTrail, you'll want to do the followin
 2. Complete the initialization steps.
 
 ## Making changes
+**Terraform**
 1. Navigate to the project folder for the project that you want to make changes for.
 2. Make changes to main.tf, terraform.tfvars, etc.
 3. Run `terraform plan -var-file=terraform.tfvars` to preview what infrastructure changes will be made.
 4. Run `terraform apply -var-file=terraform.tfvars` to apply changes.
+
+## Roadmap
+- [ ] Build out scaletrail cli
+- [ ] README updates to better explain prerequisites
+- [ ] Django setup automation
+- [ ] Next.js setup automation
+- [ ] AWS support
+- [ ] GCP support
