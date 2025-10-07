@@ -46,7 +46,19 @@ def init(
         project_name = typer.prompt("Project name")
 
     if not linode_region:
-        linode_region = typer.prompt("Linode region (e.g. us-central, eu-central)")
+        linode_region = typer.prompt("Linode region")
+
+    if not instance_type:
+        instance_type = typer.prompt("Instance type")
+
+    if not image:
+        image = typer.prompt("Image")
+
+    if not backups_enabled:
+        backups_enabled = typer.prompt("Image")
+
+    if not tags:
+        tags = typer.prompt("Tags (comma-separated)")
 
     config_dir = Path.home() / f".{project_name}"
     config_dir.mkdir(exist_ok=True)
