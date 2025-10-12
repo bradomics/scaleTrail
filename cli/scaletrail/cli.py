@@ -1,13 +1,75 @@
 import typer
+import inquirer
 from pathlib import Path
-from enum import Enum
-
 
 from rich.console import Console
 from rich_pyfiglet import RichFiglet
 
 console = Console()
 app = typer.Typer()
+
+CONTINENT_CHOICES = [
+    "North America",
+    "Europe",
+    "Asia",
+    "South America",
+    "Oceania",
+    "Show all regions"
+]
+
+NORTH_AMERICA_LINODE_REGIONS = [
+    "ca-central",
+    "us-central",
+    "us-east",
+    "us-iad",
+    "us-lax",
+    "us-mia",
+    "us-ord",
+    "us-sea",
+    "us-southeast",
+    "us-west"
+]
+
+EUROPE_LINODE_REGIONS = [
+    "de-fra-2",
+    "es-mad",
+    "eu-central",
+    "eu-west",
+    "fr-par",
+    "gb-lon",
+    "it-mil",
+    "nl-ams",
+    "se-sto"
+]
+
+ASIA_LINODE_REGIONS = [
+    "ap-northeast",
+    "ap-south",
+    "ap-west",
+    "id-cgk",
+    "in-bom-2",
+    "in-maa",
+    "jp-osa",
+    "jp-tyo-3",
+    "sg-sin-2"
+]
+
+SOUTH_AMERICA_LINODE_REGIONS = [
+    "br-gru"
+]
+
+OCEANIA_LINODE_REGIONS = [
+    "au-mel",
+    "ap-southeast"
+]
+
+CONTINENT_TO_REGIONS = {
+    "North America": NORTH_AMERICA_LINODE_REGIONS,
+    "Europe": EUROPE_LINODE_REGIONS,
+    "Asia": ASIA_LINODE_REGIONS,
+    "South America": SOUTH_AMERICA_LINODE_REGIONS,
+    "Oceania": OCEANIA_LINODE_REGIONS,
+}
 
 def show_banner():
     """Helper function to print the CLI banner."""
@@ -27,16 +89,15 @@ def show_banner():
     console.print("* [link=https://github.com/bradomics/scaleTrail?tab=readme-ov-file#scaletrail]README[/link]")
     console.print("")
 
-class NetworkType(str, Enum):
-    simple = "simple"
-    convolutional = "convolutional"
-    recurrent = "recurrent"
-
 @app.command()
 def init(
     project_name: str = typer.Option(
         "",
         help="The name of the project to initialize.",
+    ),
+    continent: str = typer.Option(
+        "",
+        help="Continent for infrastructure (North America, Europe, Asia, South America, Oceania).",
     ),
     linode_region: str = typer.Option(
         "",
@@ -74,8 +135,37 @@ def init(
     if not project_name:
         project_name = typer.prompt("Project name")
 
+    # Allow CLI overrides: if both continent and region were provided, skip prompts
     if not linode_region:
-        linode_region = typer.prompt("Linode region")
+        if not continent:
+            ans = inquirer.prompt([
+                inquirer.List("continent",
+                    message="Select a continent (or show all regions)",
+                    choices=CONTINENT_CHOICES,
+                    carousel=True)
+            ]) or {}
+            continent = ans.get("continent", "")
+            if not continent:
+                raise typer.Exit(1)
+
+        if continent == "Show all regions":
+            region_choices = sum(CONTINENT_TO_REGIONS.values(), [])  # flatten
+        else:
+            # normalize if user passed --continent europe
+            norm = continent.strip().lower()
+            alias = {c.lower(): c for c in CONTINENT_CHOICES if c != "Show all regions"}
+            continent = alias.get(norm, continent)
+            region_choices = CONTINENT_TO_REGIONS.get(continent, [])
+
+        ans = inquirer.prompt([
+            inquirer.List("linode_region",
+                message=f"Select a Linode region{f' in {continent}' if continent!='Show all regions' else ''}",
+                choices=region_choices,
+                carousel=True)
+        ]) or {}
+        linode_region = ans.get("linode_region", "")
+    if not linode_region:
+        raise typer.Exit(1)
 
     if not instance_type:
         instance_type = typer.prompt("Instance type")
