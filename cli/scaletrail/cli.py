@@ -342,6 +342,18 @@ def init(
         linode_api_key = typer.prompt("Linode API key", hide_input=True)
         add_api_key("LINODE_API_KEY", linode_api_key)
 
+    if not api_key_present("CLOUDFLARE_ACCOUNT_ID"):
+        cloudflare_account_id = typer.prompt("Cloudflare account ID", hide_input=True)
+        add_api_key("CLOUDFLARE_ACCOUNT_ID", cloudflare_account_id)
+
+    if not api_key_present("CLOUDFLARE_API_KEY"):
+        cloudflare_api_key = typer.prompt("Cloudflare API key", hide_input=True)
+        add_api_key("CLOUDFLARE_API_KEY", cloudflare_api_key)
+        
+    if not api_key_present("STRIPE_API_KEY"):
+        stripe_api_key = typer.prompt("Stripe API key", hide_input=True)
+        add_api_key("STRIPE_API_KEY", stripe_api_key)
+
     # Allow CLI overrides: if both continent and region were provided, skip prompts
     if not linode_region:
         if not continent:
