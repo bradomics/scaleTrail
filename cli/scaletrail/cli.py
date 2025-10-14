@@ -1,7 +1,10 @@
 import typer
 import inquirer
+
 from pathlib import Path
 import os
+import requests
+from typing import Any, Dict, List, Optional
 
 from rich.console import Console
 from rich_pyfiglet import RichFiglet
@@ -151,6 +154,137 @@ def find_or_create_env_file():
 
 
 
+def _pick_price(item: Dict[str, Any], region_id: str) -> Dict[str, float]:
+    """
+    Return {"hourly": x, "monthly": y} using region override if present,
+    otherwise the base price.
+    """
+    base = item.get("price", {}) or {}
+    hourly = base.get("hourly")
+    monthly = base.get("monthly")
+
+    for rp in item.get("region_prices", []) or []:
+        if rp.get("id") == region_id:
+            hourly = rp.get("hourly", hourly)
+            monthly = rp.get("monthly", monthly)
+            break
+    return {"hourly": float(hourly), "monthly": float(monthly)}
+
+def _pick_backup_price(item: Dict[str, Any], region_id: str) -> Optional[Dict[str, float]]:
+    """
+    Same as _pick_price but for the backups addon. Returns None if no backups addon.
+    """
+    backups = (item.get("addons") or {}).get("backups")
+    if not backups:
+        return None
+
+    base = (backups.get("price") or {})
+    hourly = base.get("hourly")
+    monthly = base.get("monthly")
+
+    for rp in backups.get("region_prices", []) or []:
+        if rp.get("id") == region_id:
+            hourly = rp.get("hourly", hourly)
+            monthly = rp.get("monthly", monthly)
+            break
+
+    return {"hourly": float(hourly), "monthly": float(monthly)}
+
+def _gb_from_mb(mb: int) -> float:
+    return mb / 1024.0
+
+def _fmt_money(v: float) -> str:
+    return f"${v:,.2f}"
+
+def _row(inst: dict) -> str:
+    label = inst.get("label", "")
+    cls = inst.get("class", "")
+    mem_gb = _gb_from_mb(inst.get("memory_mb", 0))
+    disk_gb = _gb_from_mb(inst.get("disk_mb", 0))
+    xfer_gb = inst.get("transfer_gb", 0)
+    monthly = inst.get("price_monthly", 0.0)
+    backups = inst.get("backups_monthly", 0.0)
+
+    # Tweak widths to taste; these work well in a standard terminal
+    return (
+        f"{label:<18} | "
+        f"{cls:<9} | "
+        f"{mem_gb:>6.0f} | "
+        f"{disk_gb:>7.0f} | "
+        f"{xfer_gb:>11} | "
+        f"{_fmt_money(monthly):>10} | "
+        f"{_fmt_money(backups):>14}"
+    )
+
+def choose_instance(instances: list, message: str = "Select a Linode plan"):
+    instances_sorted = sorted(instances, key=lambda x: x.get("price_monthly", 0))
+
+    header = (
+        f"{'Label':<18} | "
+        f"{'Class':<9} | "
+        f"{'Mem GB':>6} | "
+        f"{'Disk GB':>7} | "
+        f"{'Transfer GB':>11} | "
+        f"{'Monthly':>10} | "
+        f"{'Backups Monthly':>14}"
+    )
+
+    # Show header above the prompt
+    print(header)
+    print("-" * len(header))
+
+    # python-inquirer expects choices as strings OR (name, value) tuples
+    choices = [(_row(inst), inst["id"]) for inst in instances_sorted]
+
+    questions = [
+        inquirer.List(
+            "selected",
+            message=message,
+            choices=choices,
+            carousel=True,  # supported in python-inquirer
+        )
+    ]
+    answers = inquirer.prompt(questions)
+    if not answers:
+        return None
+
+    selected_id = answers["selected"]
+    # return full instance (not just id)
+    return next((i for i in instances if i["id"] == selected_id), None)
+
+def get_instances_for_region(resp: Dict[str, Any], region_id: str, 
+                             include_classes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """
+    Flatten the Linode types payload into a list of dicts with the right
+    price for `region_id`. Optionally filter by class (e.g., ["standard","dedicated"]).
+    """
+    out: List[Dict[str, Any]] = []
+    for itm in resp.get("data", []) or []:
+        if include_classes and itm.get("class") not in include_classes:
+            continue
+
+        price = _pick_price(itm, region_id)
+        backup_price = _pick_backup_price(itm, region_id)
+
+        out.append({
+            "id": itm.get("id"),
+            "label": itm.get("label"),
+            "class": itm.get("class"),
+            "vcpus": itm.get("vcpus"),
+            "memory_mb": itm.get("memory"),
+            "disk_mb": itm.get("disk"),
+            "transfer_gb": itm.get("transfer"),
+            "gpus": itm.get("gpus"),
+            "network_out_mbps": itm.get("network_out"),
+            "price_hourly": price["hourly"],
+            "price_monthly": price["monthly"],
+            "backups_hourly": backup_price["hourly"] if backup_price else None,
+            "backups_monthly": backup_price["monthly"] if backup_price else None,
+        })
+    return out
+
+
+
 @app.command()
 def init(
     project_name: str = typer.Option(
@@ -237,6 +371,30 @@ def init(
                 carousel=True)
         ]) or {}
         linode_region = ans.get("linode_region", "")
+        console.print(f"Selected region: {linode_region}")
+                # Use continent to filter for available Linode types
+        url = "https://api.linode.com/v4/linode/types"
+
+        payload = {}
+        headers = {
+            'Accept': 'application/json',
+            'Authorization': linode_api_key
+        }
+
+        response = requests.request("GET", url, headers=headers, data=payload)
+        console.print('Available Linode instance types:')
+        # region_id could be "us-east", "us-ord", "br-gru", "id-cgk", etc.
+        instances = get_instances_for_region(response.json(), region_id="br-gru",
+                                            include_classes=["nanode","standard","dedicated","premium"])
+        # Assuming `instances` is your processed list (region-adjusted pricing)
+        selected = choose_instance(instances, message="Pick a size for your Linode instance")
+        if selected:
+            # selected is the whole instance dict (change value=inst["id"] above if you only want the id)
+            print("You chose:", selected["id"], "-", selected["label"])
+                
+            # `instances` is now a list of rows with region-adjusted hourly/monthly (and backups) pricing.
+            console.print(instances)
+
     if not linode_region:
         raise typer.Exit(1)
 
