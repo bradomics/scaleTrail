@@ -3,12 +3,14 @@ import inquirer
 
 from pathlib import Path
 import os
+from dotenv import load_dotenv
 import requests
 from typing import Any, Dict, List, Optional
 
 from rich.console import Console
 from rich_pyfiglet import RichFiglet
 
+load_dotenv()
 console = Console()
 app = typer.Typer()
 
@@ -283,6 +285,63 @@ def get_instances_for_region(resp: Dict[str, Any], region_id: str,
         })
     return out
 
+def get_cloudflare_zone_id(domain: str, cloudflare_api_key: str) -> Optional[str]:
+    """Fetches the Cloudflare Zone ID for a given domain."""
+    url = "https://api.cloudflare.com/client/v4/zones"
+    headers = {
+        "Authorization": f"Bearer {cloudflare_api_key}",
+        "Content-Type": "application/json"
+    }
+    params = {"name": domain}
+
+    response = requests.get(url, headers=headers, params=params)
+    if response.status_code == 200:
+        data = response.json()
+        if data.get("success") and data.get("result"):
+            print(f"cloudflare zone ID for domain {domain} is {data['result'][0]['id']}")
+            return data["result"][0]["id"]
+    console.print(f"[red]Error fetching Zone ID for domain {domain}[/red]")
+    return None
+
+def get_cloudflare_dns_records(zone_id: str, cloudflare_api_key: str) -> Optional[List[Dict[str, Any]]]:
+    """Fetches DNS records for a given Cloudflare Zone ID."""
+    url = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records"
+    headers = {
+        "Authorization": f"Bearer {cloudflare_api_key}",
+        "Content-Type": "application/json"
+    }
+
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        data = response.json()
+        if data.get("success"):
+            return data.get("result", [])
+    console.print(f"[red]Error fetching DNS records for zone ID {zone_id}[/red]")
+    return None
+
+def subdomain_is_available(records, subdomain, root_domain):
+    """
+    Checks whether a given subdomain (like 'dev') or the root domain
+    already exists as an A or CNAME record.
+    Returns True if available, False if it already exists.
+    """
+    # Handle root domain (no subdomain)
+    if not subdomain or subdomain in ("@", "", root_domain):
+        target_name = root_domain.lower()
+    else:
+        target_name = f"{subdomain}.{root_domain}".lower()
+
+    for record in records:
+        record_name = record.get("name", "").lower()
+        record_type = record.get("type", "").upper()
+
+        if record_type in ("A", "CNAME") and record_name == target_name:
+            return False  # already exists (not available)
+
+    return True  # available
+
+def root_domain_is_availabile(records, root_domain):
+    return subdomain_is_available(records, "", root_domain)
 
 
 @app.command()
@@ -307,9 +366,13 @@ def init(
         "",
         help="The Linode instance type for your desired infrastructure.",
     ),
+    domain_to_configure: str = typer.Option(
+        "",
+        help="The domain to configure for your infrastructure (e.g., example.com).",
+    ),
     image: str = typer.Option(
         "",
-        help="The Linode image slug for your desired infrastructure's base image.",
+        help="The Linode image slug for your desired infrastructure's base image.",# TODO: move image, backups enabled, etc. to prior step. Also create a simple option that bypasses unneeded prompts and goes with a default configuration
     ),
     backups_enabled: bool = typer.Option(
         False,
@@ -341,6 +404,26 @@ def init(
     if not api_key_present("LINODE_API_KEY"):
         linode_api_key = typer.prompt("Linode API key", hide_input=True)
         add_api_key("LINODE_API_KEY", linode_api_key)
+    else:
+        cloudflare_api_key = os.getenv("LINODE_API_KEY")
+
+    if not api_key_present("CLOUDFLARE_ACCOUNT_ID"):
+        cloudflare_account_id = typer.prompt("Cloudflare account ID", hide_input=True)
+        add_api_key("CLOUDFLARE_ACCOUNT_ID", cloudflare_account_id)
+    else:
+        cloudflare_account_id = os.getenv("CLOUDFLARE_ACCOUNT_ID")
+
+    if not api_key_present("CLOUDFLARE_API_KEY"):
+        cloudflare_api_key = typer.prompt("Cloudflare API key", hide_input=True)
+        add_api_key("CLOUDFLARE_API_KEY", cloudflare_api_key)
+    else:
+        cloudflare_api_key = os.getenv("CLOUDFLARE_API_KEY")
+        
+    if not api_key_present("STRIPE_API_KEY"):
+        stripe_api_key = typer.prompt("Stripe API key", hide_input=True)
+        add_api_key("STRIPE_API_KEY", stripe_api_key)
+    else:
+        stripe_api_key = os.getenv("STRIPE_API_KEY")
 
     # Allow CLI overrides: if both continent and region were provided, skip prompts
     if not linode_region:
@@ -397,6 +480,42 @@ def init(
 
     if not linode_region:
         raise typer.Exit(1)
+
+    if not domain_to_configure:
+        domain_to_configure = typer.prompt("Domain to configure (e.g., example.com)")
+
+        # Get Zone ID via Cloudflare
+        domain_zone_id = get_cloudflare_zone_id(domain_to_configure, cloudflare_api_key)
+        print('here is the domain_zone_id', domain_zone_id)
+        dns_records = get_cloudflare_dns_records(domain_zone_id, cloudflare_api_key)
+
+
+        # TODO: Turn these statements into a function
+        if root_domain_is_availabile(dns_records, domain_to_configure):
+            console.print(f"The root domain [bold]{domain_to_configure}[/bold] is available!\n It will be used to host the [bold]front end[/bold] server for the [bold][green]production[/green][/bold] environment.\n")
+        else:
+            console.print(f"[red]The root domain [bold]{domain_to_configure}[/bold] is already taken![/red]\n")
+
+        if subdomain_is_available(dns_records, 'www', domain_to_configure):
+            console.print(f"[bold]www.{domain_to_configure}[/bold] subdomain is available!\n")
+        else:
+            console.print(f"[red][bold]www.{domain_to_configure}[/bold] subdomain is already taken![/red]\n")
+        
+        if subdomain_is_available(dns_records, 'dev', domain_to_configure):
+            console.print(f"[bold]dev.{domain_to_configure}[/bold] subdomain is available!\nIt will be used to host the [bold]front end[/bold] server for the [bold][blue]dev[/blue][/bold] environment.\n")
+        else:
+            console.print(f"[red][bold]dev.{domain_to_configure}[/bold] subdomain is already taken![/red]\n")
+
+        if subdomain_is_available(dns_records, 'dev-api', domain_to_configure):
+            console.print(f"[bold]dev-api.{domain_to_configure}[/bold] subdomain is available!\nIt will be used to host the [bold]back end[/bold] server for the [bold][blue]dev[/blue][/bold] environment.\n")
+        else:
+            console.print(f"[red][bold]dev-api.{domain_to_configure}[/bold] subdomain is already taken![/red]\n")
+
+        if subdomain_is_available(dns_records, 'api', domain_to_configure):
+            console.print(f"[bold]api.{domain_to_configure}[/bold] subdomain is available!\nIt will be used to host the [bold]back end[/bold] server for the [bold][green]production[/green][/bold] environment.\n")
+        else:
+            console.print(f"[red][bold]api.{domain_to_configure}[/bold] subdomain is already taken![/red]\n")
+
 
     if not instance_type:
         instance_type = typer.prompt("Instance type")
