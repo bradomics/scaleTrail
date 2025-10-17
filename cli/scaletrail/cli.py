@@ -1,5 +1,8 @@
 import typer
 import inquirer
+import sys
+import json
+from tomlkit import document, table, dumps, parse
 
 from pathlib import Path
 import os
@@ -13,6 +16,9 @@ from rich_pyfiglet import RichFiglet
 load_dotenv()
 console = Console()
 app = typer.Typer()
+
+# Default env. choices for prompts
+ENV_CHOICES = ["dev", "staging", "prod"]
 
 CONTINENT_CHOICES = [
     "North America",
@@ -344,6 +350,32 @@ def root_domain_is_availabile(records, root_domain):
     return subdomain_is_available(records, "", root_domain)
 
 
+def select_environments() -> List[str]:
+    """
+    Ask which environments to set up. Supports dev/staging/prod or custom list.
+    """
+    answers = inquirer.prompt([
+        inquirer.Checkbox(
+            "envs",
+            message="Which environments do you want to set up? (Use the space bar to select, enter to confirm)",
+            choices=ENV_CHOICES,
+            carousel=True,
+        )
+    ]) or {}
+
+    envs = answers.get("envs", [])
+    # If user chose "custom...", prompt for comma-separated list
+    if "custom..." in envs:
+        custom = typer.prompt("Enter custom environment names (comma-separated, e.g. qa, preview)")
+        custom_list = [e.strip() for e in custom.split(",") if e.strip()]
+        # merge (and remove the "custom..." tag)
+        envs = [e for e in envs if e != "custom..."] + custom_list
+
+    if not envs:
+        console.print("[red]No environments selected.[/red]")
+        raise typer.Exit(1)
+    return envs
+
 @app.command()
 def init(
     project_name: str = typer.Option(
@@ -465,18 +497,24 @@ def init(
         }
 
         response = requests.request("GET", url, headers=headers, data=payload)
+        envs = select_environments()
         console.print('Available Linode instance types:')
         # region_id could be "us-east", "us-ord", "br-gru", "id-cgk", etc.
         instances = get_instances_for_region(response.json(), region_id="br-gru",
                                             include_classes=["nanode","standard","dedicated","premium"])
-        # Assuming `instances` is your processed list (region-adjusted pricing)
-        selected = choose_instance(instances, message="Pick a size for your Linode instance")
-        if selected:
-            # selected is the whole instance dict (change value=inst["id"] above if you only want the id)
-            print("You chose:", selected["id"], "-", selected["label"])
-                
-            # `instances` is now a list of rows with region-adjusted hourly/monthly (and backups) pricing.
-            console.print(instances)
+
+        env_instance_types: Dict[str, str] = {}
+        for env in envs:
+            console.print(f"\n[bold]Environment:[/bold] {env}")
+            selected = choose_instance(
+                instances,
+                message=f"Pick a size for the '{env}' environment (region: {linode_region})"
+            )
+            if not selected:
+                console.print(f"[red]No instance selected for {env}. Aborting.[/red]")
+                raise typer.Exit(1)
+            env_instance_types[env] = selected["id"]
+            console.print(f"→ {env}: [bold]{selected['label']}[/bold] ({selected['id']})")
 
     if not linode_region:
         raise typer.Exit(1)
@@ -535,13 +573,47 @@ def init(
     if not sendgrid_api_key:
         sendgrid_api_key = typer.prompt("SendGrid API key")
 
+    # Persist full configuration as TOML — one file per environment
+    out_dir = Path.cwd() / "config"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    config_dir = Path.home() / f".{project_name}"
-    config_dir.mkdir(exist_ok=True)
-    config_file = config_dir / "config.ini"
-    config_file.write_text("[settings]\ninitialized=True\n")
-    typer.echo("")
-    typer.echo(f"Initialized project '{project_name}' in {config_dir}")
+    for env_name in envs:
+        # pick the instance type for this env (guard in case of missing key)
+        instance_id = env_instance_types.get(env_name, "")
+
+        config_data = {
+            "project": {
+                "name": project_name,
+                "initialized": True,
+            },
+            # helpful to store which env this file represents
+            "environment": {
+                "name": env_name
+            },
+            "linode": {
+                "region": linode_region,
+                "image": image,
+                "backups_enabled": bool(backups_enabled),
+                "tags": [t.strip() for t in tags.split(",")] if tags else [],
+                # keep a single env block in each file for clarity
+                "instance_type": instance_id,
+            },
+            "cloudflare": {
+                "account_id_saved": bool(cloudflare_account_id),
+                "api_key_saved": bool(cloudflare_api_key),
+            },
+            "stripe": {"api_key_saved": bool(stripe_api_key)},
+            "sendgrid": {"api_key_saved": bool(sendgrid_api_key)},
+            "domain": {"root": domain_to_configure},
+        }
+
+        # Write ./config/<env>-config.toml
+        config_file = out_dir / f"{env_name}-config.toml"
+        config_file.write_text(dumps(config_data), encoding="utf-8")
+
+    env_list = ", ".join(envs)
+    console.print(f"[green]Configs for [bold]{env_list}[/bold] have been saved to the [bold]config[/bold] folder.[/green]")
+    console.print(f"Initialization complete! You can now run [bold]scaletrail preview[/bold] and [bold]scaletrail deploy[/bold] to preview and deploy your infrastructure.")
 
 # Other commands will not show the banner
 @app.command()
