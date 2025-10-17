@@ -20,6 +20,12 @@ app = typer.Typer()
 # Default env. choices for prompts
 ENV_CHOICES = ["dev", "staging", "prod"]
 
+ENV_COLORS= {
+    "dev": "blue",
+    "staging": "purple",
+    "prod": "green"
+}
+
 CONTINENT_CHOICES = [
     "North America",
     "Europe",
@@ -501,14 +507,14 @@ def init(
         console.print('Available Linode instance types:')
         # region_id could be "us-east", "us-ord", "br-gru", "id-cgk", etc.
         instances = get_instances_for_region(response.json(), region_id="br-gru",
-                                            include_classes=["nanode","standard","dedicated","premium"])
+            include_classes=["nanode","standard","dedicated","premium"])
 
         env_instance_types: Dict[str, str] = {}
         for env in envs:
             console.print(f"\n[bold]Environment:[/bold] {env}")
+            console.print(f"Pick a size for the '{env}' environment (region: {linode_region})\n")
             selected = choose_instance(
-                instances,
-                message=f"Pick a size for the '{env}' environment (region: {linode_region})"
+                instances
             )
             if not selected:
                 console.print(f"[red]No instance selected for {env}. Aborting.[/red]")
@@ -528,35 +534,34 @@ def init(
         dns_records = get_cloudflare_dns_records(domain_zone_id, cloudflare_api_key)
 
 
-        # TODO: Turn these statements into a function
-        if root_domain_is_availabile(dns_records, domain_to_configure):
-            console.print(f"The root domain [bold]{domain_to_configure}[/bold] is available!\n It will be used to host the [bold]front end[/bold] server for the [bold][green]production[/green][/bold] environment.\n")
-        else:
-            console.print(f"[red]The root domain [bold]{domain_to_configure}[/bold] is already taken![/red]\n")
 
-        if subdomain_is_available(dns_records, 'www', domain_to_configure):
-            console.print(f"[bold]www.{domain_to_configure}[/bold] subdomain is available!\n")
-        else:
-            console.print(f"[red][bold]www.{domain_to_configure}[/bold] subdomain is already taken![/red]\n")
-        
-        if subdomain_is_available(dns_records, 'dev', domain_to_configure):
-            console.print(f"[bold]dev.{domain_to_configure}[/bold] subdomain is available!\nIt will be used to host the [bold]front end[/bold] server for the [bold][blue]dev[/blue][/bold] environment.\n")
-        else:
-            console.print(f"[red][bold]dev.{domain_to_configure}[/bold] subdomain is already taken![/red]\n")
+        for env in envs:
+            if env == "prod":
+                # TODO: Turn these statements into a function
+                if root_domain_is_availabile(dns_records, domain_to_configure):
+                    console.print(f"The root domain [bold]{domain_to_configure}[/bold] is available!\n It will be used to host the [bold]front end[/bold] server for the [bold][{ENV_COLORS[env]}]production[/{ENV_COLORS[env]}][/bold] environment.\n")
+                else:
+                    console.print(f"[red][bold]Warning![/bold] The root domain [bold]{domain_to_configure}[/bold] has an existing A or CNAME record! It will be overwritten![/red]\n")
 
-        if subdomain_is_available(dns_records, 'dev-api', domain_to_configure):
-            console.print(f"[bold]dev-api.{domain_to_configure}[/bold] subdomain is available!\nIt will be used to host the [bold]back end[/bold] server for the [bold][blue]dev[/blue][/bold] environment.\n")
-        else:
-            console.print(f"[red][bold]dev-api.{domain_to_configure}[/bold] subdomain is already taken![/red]\n")
+                if subdomain_is_available(dns_records, 'www', domain_to_configure):
+                    console.print(f"[bold]www.{domain_to_configure}[/bold] subdomain is available!\n")
+                else:
+                    console.print(f"[red][bold]Warning![/bold] The [bold]www.{domain_to_configure}[/bold] has an existing A or CNAME record! It will be overwritten![/red]\n")
 
-        if subdomain_is_available(dns_records, 'api', domain_to_configure):
-            console.print(f"[bold]api.{domain_to_configure}[/bold] subdomain is available!\nIt will be used to host the [bold]back end[/bold] server for the [bold][green]production[/green][/bold] environment.\n")
-        else:
-            console.print(f"[red][bold]api.{domain_to_configure}[/bold] subdomain is already taken![/red]\n")
+                if subdomain_is_available(dns_records, 'api', domain_to_configure):
+                    console.print(f"[bold]api.{domain_to_configure}[/bold] subdomain is available!\nIt will be used to host the [bold]back end[/bold] server for the [bold][{ENV_COLORS[env]}]production[/{ENV_COLORS[env]}][/bold] environment.\n")
+                else:
+                    console.print(f"[red][bold]Warning![/bold] The [bold]api.{domain_to_configure}[/bold] has an existing A or CNAME record! It will be overwritten![/red]\n")
+            else:
+                if subdomain_is_available(dns_records, f"{env}", domain_to_configure):
+                    console.print(f"[bold]{env}.{domain_to_configure}[/bold] subdomain is available!\nIt will be used to host the [bold]front end[/bold] server for the [bold][{ENV_COLORS[env]}]{env}[/{ENV_COLORS[env]}][/bold] environment.\n")
+                else:
+                    console.print(f"[red][bold]{env}.{domain_to_configure}[/bold] subdomain is already taken![/red]\n")
 
-
-    if not instance_type:
-        instance_type = typer.prompt("Instance type")
+                if subdomain_is_available(dns_records, f"{env}-api", domain_to_configure):
+                    console.print(f"[bold]{env}-api.{domain_to_configure}[/bold] subdomain is available!\nIt will be used to host the [bold]back end[/bold] server for the [bold][{ENV_COLORS[env]}]{env}[/{ENV_COLORS[env]}][/bold] environment.\n")
+                else:
+                    console.print(f"[red][bold]{env}-api.{domain_to_configure}[/bold] subdomain is already taken![/red]\n")
 
     if not image:
         image = typer.prompt("Image")
